@@ -8,7 +8,7 @@ Building 21 practical, daily-use, real-world tools and applications in 21 days a
 
 ### Week 1: Daily Hacks & Student Life Automation (Python)
 - [x] **Day 01:** [DownloadJanitor](day-01-download-janitor/) — Automated downloads & file organizer with dry-run and undo.
-- [ ] **Day 02:** ExamPrep AI — Lecture slide/PDF to flashcards & quiz generator.
+- [x] **Day 02:** [ExamPrep AI](day-02-examprep-ai/) — Interactive web app turning lecture PDFs to flashcards & quizzes.
 - [ ] **Day 03:** DealDrop Alert — Price drop tracker with Telegram alerts.
 - [ ] **Day 04:** WhatsApp Chat Wrapped — Chat analytics, peak hours & word cloud generator.
 - [ ] **Day 05:** Lecture-to-Notes — YouTube lecture to timestamped markdown notes.
