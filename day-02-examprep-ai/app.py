@@ -1,85 +1,176 @@
-"""ExamPrep AI - Day 02: 21 Days of Vibecoding Challenge
-Interactive Web App: Turn lecture PDFs and notes into revision sheets, flashcards, and quizzes.
+"""ExamPrep AI — Day 02: 21 Days of Vibecoding Challenge
+Bespoke White & Crimson Red Theme | Strictly Grounded on User Documents.
 """
 
 import os
 import streamlit as st
 from pathlib import Path
 from pdf_extractor import extract_from_uploaded_file, clean_extracted_text
-from ai_engine import generate_study_materials, export_summary_to_pdf, SAMPLE_OS_PRESETS
+from ai_engine import generate_study_materials, export_summary_to_pdf
 
 # Page configuration
 st.set_page_config(
-    page_title="ExamPrep AI — Study & Quiz Companion",
-    page_icon="🎓",
+    page_title="ExamPrep AI",
+    page_icon="📖",
     layout="wide",
     initial_sidebar_state="expanded",
 )
 
-# Custom CSS for modern student-friendly aesthetics
+# Bespoke White & Crimson Red Design System
 st.markdown("""
 <style>
-    .main-header {
-        font-size: 2.2rem;
-        font-weight: 700;
-        color: #1E3A8A;
+    /* Global Reset & Typography */
+    .stApp {
+        background-color: #FFFFFF;
+        color: #0F172A;
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    }
+    
+    /* Hide default Streamlit decoration */
+    header {visibility: hidden;}
+    footer {visibility: hidden;}
+    #MainMenu {visibility: hidden;}
+
+    /* Sidebar Styling */
+    section[data-testid="stSidebar"] {
+        background-color: #FAFAFA !important;
+        border-right: 1px solid #E2E8F0;
+    }
+    
+    /* Brand Header */
+    .brand-title {
+        font-size: 2.1rem;
+        font-weight: 800;
+        letter-spacing: -0.03em;
+        color: #0F172A;
         margin-bottom: 0.2rem;
     }
-    .sub-header {
-        font-size: 1.05rem;
-        color: #475569;
-        margin-bottom: 1.5rem;
+    .brand-title span {
+        color: #DC2626; /* Crimson Red */
     }
+    .brand-subtitle {
+        font-size: 0.95rem;
+        color: #64748B;
+        margin-bottom: 1.5rem;
+        line-height: 1.5;
+    }
+    
+    /* Badges */
+    .status-badge {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        padding: 4px 10px;
+        border-radius: 9999px;
+        font-size: 0.8rem;
+        font-weight: 600;
+        margin-bottom: 1rem;
+    }
+    .badge-offline {
+        background-color: #FEF2F2;
+        color: #DC2626;
+        border: 1px solid #FCA5A5;
+    }
+    .badge-ai {
+        background-color: #F0FDF4;
+        color: #166534;
+        border: 1px solid #86EFAC;
+    }
+    
+    /* Cards & Containers */
+    .content-box {
+        background-color: #FFFFFF;
+        border: 1px solid #E2E8F0;
+        border-radius: 8px;
+        padding: 20px;
+        margin-bottom: 16px;
+    }
+    
+    /* Flashcard Modern Red Design */
     .flashcard-box {
-        background: linear-gradient(135deg, #F8FAFC 0%, #EFF6FF 100%);
-        border: 2px solid #BFDBFE;
-        border-radius: 12px;
-        padding: 24px;
-        margin: 12px 0px;
-        min-height: 140px;
-        box-shadow: 0 4px 6px -1px rgba(0,0,0,0.05);
+        background-color: #FFFFFF;
+        border: 1px solid #E2E8F0;
+        border-left: 5px solid #DC2626;
+        border-radius: 8px;
+        padding: 28px;
+        margin: 16px 0;
+        min-height: 150px;
+        box-shadow: 0 4px 12px rgba(220, 38, 38, 0.05);
     }
     .flashcard-q {
         font-size: 1.15rem;
-        font-weight: 600;
-        color: #1E3A8A;
-        margin-bottom: 8px;
+        font-weight: 700;
+        color: #0F172A;
+        line-height: 1.4;
     }
     .flashcard-a {
         font-size: 1.05rem;
-        color: #0F172A;
-        margin-top: 12px;
-        padding-top: 12px;
-        border-top: 1px dashed #93C5FD;
+        color: #1E293B;
+        margin-top: 16px;
+        padding-top: 16px;
+        border-top: 1px solid #FEE2E2;
+        line-height: 1.5;
     }
+    
+    /* Quiz Cards */
     .quiz-card {
         background-color: #FFFFFF;
         border: 1px solid #E2E8F0;
-        border-radius: 10px;
-        padding: 18px;
-        margin-bottom: 16px;
-        box-shadow: 0 2px 4px rgba(0,0,0,0.03);
-    }
-    .quiz-q {
-        font-weight: 600;
-        font-size: 1.05rem;
-        color: #1E293B;
-        margin-bottom: 10px;
-    }
-    .score-badge {
-        font-size: 1.3rem;
-        font-weight: 700;
-        color: #166534;
-        background-color: #DCFCE7;
-        padding: 10px 18px;
+        border-left: 4px solid #DC2626;
         border-radius: 8px;
-        display: inline-block;
-        margin-bottom: 15px;
+        padding: 16px 20px;
+        margin-bottom: 14px;
+    }
+    .quiz-num {
+        font-size: 0.75rem;
+        font-weight: 700;
+        letter-spacing: 0.05em;
+        text-transform: uppercase;
+        color: #DC2626;
+        margin-bottom: 4px;
+    }
+    .quiz-question {
+        font-size: 1rem;
+        font-weight: 600;
+        color: #0F172A;
+    }
+    
+    /* Primary Red Button Override */
+    div.stButton > button[kind="primary"] {
+        background-color: #DC2626 !important;
+        border-color: #DC2626 !important;
+        color: #FFFFFF !important;
+        font-weight: 600 !important;
+        border-radius: 6px !important;
+        transition: all 0.15s ease-in-out;
+    }
+    div.stButton > button[kind="primary"]:hover {
+        background-color: #B91C1C !important;
+        border-color: #B91C1C !important;
+        box-shadow: 0 4px 12px rgba(220, 38, 38, 0.25) !important;
+    }
+    
+    /* Tabs Underline Accent */
+    button[data-baseweb="tab"][aria-selected="true"] {
+        color: #DC2626 !important;
+        border-bottom-color: #DC2626 !important;
+    }
+    
+    /* Score Box */
+    .score-box {
+        background-color: #FEF2F2;
+        border: 1px solid #FCA5A5;
+        border-radius: 8px;
+        padding: 16px 20px;
+        color: #991B1B;
+        font-size: 1.15rem;
+        font-weight: 700;
+        margin-bottom: 16px;
     }
 </style>
 """, unsafe_allow_html=True)
 
-# Initialize session states
+# Session States
 if "study_data" not in st.session_state:
     st.session_state["study_data"] = None
 if "current_card" not in st.session_state:
@@ -90,234 +181,228 @@ if "quiz_submitted" not in st.session_state:
     st.session_state["quiz_submitted"] = False
 if "user_answers" not in st.session_state:
     st.session_state["user_answers"] = {}
+if "extracted_doc_text" not in st.session_state:
+    st.session_state["extracted_doc_text"] = ""
 
-# --- SIDEBAR CONFIGURATION ---
+# --- SIDEBAR ---
 with st.sidebar:
-    st.image("https://img.icons8.com/clouds/200/graduation-cap.png", width=100)
-    st.title("Settings & AI")
+    st.markdown("### ⚙️ Engine Settings")
     
     api_key_input = st.text_input(
-        "Google Gemini API Key",
+        "Gemini API Key (Optional)",
         value=os.environ.get("GEMINI_API_KEY", ""),
         type="password",
-        help="Get a free key from Google AI Studio (aistudio.google.com). Leave blank to use Instant Demo Mode.",
+        help="Paste a free key from Google AI Studio (aistudio.google.com). If empty, the app uses the built-in Local Document Extractor.",
     )
     
-    if not api_key_input:
-        st.info("💡 **Demo Mode Active**: No API key? No problem! The app will use curated college Operating Systems notes so you can test everything immediately.")
+    has_api_key = bool(api_key_input and api_key_input.strip() not in ("", "DEMO", "OFFLINE"))
     
-    num_questions = st.slider("Quiz Questions Count", min_value=3, max_value=10, value=5)
+    if has_api_key:
+        st.markdown('<div class="status-badge badge-ai">🟢 Gemini AI Active (Strict Grounding)</div>', unsafe_allow_html=True)
+    else:
+        st.markdown('<div class="status-badge badge-offline">🔴 Local Document Extractor Active</div>', unsafe_allow_html=True)
+        st.caption("Zero external dependencies. Content is 100% strictly extracted from your uploaded file.")
+
+    st.divider()
+    num_questions = st.slider("Practice Questions", min_value=3, max_value=8, value=4)
     
     st.divider()
-    st.subheader("📚 Quick Sample Notes")
-    if st.button("Load Sample OS Notes", use_container_width=True):
-        sample_path = Path(__file__).parent / "sample_notes" / "os_process_notes.txt"
-        if sample_path.exists():
-            with open(sample_path, "r", encoding="utf-8") as f:
-                st.session_state["input_text"] = f.read()
-            st.success("Loaded Operating Systems lecture notes!")
-            
-    st.divider()
-    st.caption("Day 02 • 21 Days of Vibecoding\nBuilt by Devaki Harish Nair")
+    st.caption("Day 02 • 21 Days of Vibecoding\nAuthor: Devaki Harish Nair")
 
 
 # --- MAIN HEADER ---
-st.markdown('<div class="main-header">🎓 ExamPrep AI — College Study Hub</div>', unsafe_allow_html=True)
-st.markdown('<div class="sub-header">Upload your lecture slides or notes to instantly generate revision sheets, active-recall flashcards, and practice quizzes.</div>', unsafe_allow_html=True)
+st.markdown('<div class="brand-title">ExamPrep <span>AI</span></div>', unsafe_allow_html=True)
+st.markdown('<div class="brand-subtitle">Strictly document-grounded revision sheets, active-recall flashcards, and practice quizzes for college students.</div>', unsafe_allow_html=True)
 
-# --- INPUT SECTION ---
-input_col1, input_col2 = st.columns([1, 1], gap="medium")
+# --- UPLOAD SECTION ---
+col_upload, col_text = st.columns([1, 1], gap="medium")
 
-with input_col1:
+with col_upload:
     uploaded_file = st.file_uploader(
-        "Upload Lecture PDF or Notes (.pdf, .txt)",
+        "Upload Course Material (.pdf, .txt, .md)",
         type=["pdf", "txt", "md"],
-        help="Upload lecture slide deck or syllabus module",
+        help="Upload lecture slide deck, syllabus, or lab manual",
     )
     if uploaded_file is not None:
         try:
-            extracted = extract_from_uploaded_file(uploaded_file)
-            st.session_state["input_text"] = extracted
-            st.success(f"✓ Extracted {len(extracted):,} characters from '{uploaded_file.name}'")
+            raw_extracted = extract_from_uploaded_file(uploaded_file)
+            st.session_state["extracted_doc_text"] = raw_extracted
+            st.success(f"✓ Parsed '{uploaded_file.name}' ({len(raw_extracted):,} characters)")
         except Exception as e:
-            st.error(f"Error reading file: {e}")
+            st.error(f"Error parsing file: {e}")
 
-with input_col2:
-    notes_text = st.text_area(
-        "Or paste your lecture notes here:",
-        value=st.session_state.get("input_text", ""),
-        height=180,
-        placeholder="Paste syllabus contents, lecture slides text, or textbook sections...",
+with col_text:
+    pasted_text = st.text_area(
+        "Or paste lecture text / syllabus directly:",
+        value=st.session_state.get("extracted_doc_text", ""),
+        height=140,
+        placeholder="Paste lecture notes, syllabus module, or textbook excerpt...",
     )
-    st.session_state["input_text"] = notes_text
+    if pasted_text != st.session_state.get("extracted_doc_text", ""):
+        st.session_state["extracted_doc_text"] = pasted_text
 
-# Action button
-generate_clicked = st.button("⚡ Generate Study Materials", type="primary", use_container_width=True)
+# Text Inspector Expander (Transparency)
+doc_content = st.session_state.get("extracted_doc_text", "").strip()
+if doc_content:
+    with st.expander("🔍 Inspect Extracted Document Text (Confirm what is being analyzed)"):
+        st.text(doc_content[:1500] + ("\n... [truncated for preview]" if len(doc_content) > 1500 else ""))
 
-if generate_clicked:
-    content_to_process = st.session_state.get("input_text", "").strip()
-    if not content_to_process and not api_key_input:
-        # Auto load sample notes if user just clicked generate
-        sample_path = Path(__file__).parent / "sample_notes" / "os_process_notes.txt"
-        if sample_path.exists():
-            with open(sample_path, "r", encoding="utf-8") as f:
-                content_to_process = f.read()
-                st.session_state["input_text"] = content_to_process
-    
-    if not content_to_process:
-        st.warning("Please upload a file, paste notes, or click 'Load Sample OS Notes' in the sidebar!")
+# Generate Button
+st.write("")
+btn_generate = st.button("⚡ Generate Study Materials from Document", type="primary", use_container_width=True)
+
+if btn_generate:
+    if not doc_content:
+        st.error("Please upload a PDF file or paste lecture notes first!")
     else:
-        with st.spinner("Analyzing document and generating high-yield exam materials..."):
-            result = generate_study_materials(
-                content_text=content_to_process,
-                api_key=api_key_input,
+        with st.spinner("Analyzing document and extracting core concepts..."):
+            study_result = generate_study_materials(
+                content_text=doc_content,
+                api_key=api_key_input if has_api_key else None,
                 num_questions=num_questions,
             )
-            st.session_state["study_data"] = result
+            st.session_state["study_data"] = study_result
             st.session_state["quiz_submitted"] = False
             st.session_state["user_answers"] = {}
             st.session_state["current_card"] = 0
             st.session_state["card_flipped"] = False
             st.rerun()
 
-# --- DISPLAY TABS (If materials exist) ---
+# --- STUDY MATERIALS DISPLAY ---
 data = st.session_state.get("study_data")
 
 if data:
-    st.markdown("---")
+    st.write("")
+    st.divider()
     
+    # Engine Used Header
+    engine_label = data.get("engine_used", "Document Extractor")
+    if "Gemini" in engine_label:
+        st.markdown(f'<div class="status-badge badge-ai">🟢 Grounded by {engine_label}</div>', unsafe_allow_html=True)
+    else:
+        st.markdown(f'<div class="status-badge badge-offline">🔴 Strictly Grounded by {engine_label}</div>', unsafe_allow_html=True)
+        
     if "error_notice" in data:
-        st.warning(f"Note: API call noticed an issue ({data['error_notice']}). Displaying curated high-yield sample material.")
+        st.warning(data["error_notice"])
 
     tab_summary, tab_flashcards, tab_quiz = st.tabs([
         "📌 Fast Revision Sheet",
         "🎴 Digital Flashcards",
-        "📝 Self-Grading Mock Quiz",
+        "📝 Self-Grading Quiz",
     ])
 
     # --- TAB 1: REVISION SHEET ---
     with tab_summary:
-        st.markdown(data.get("summary", "No summary generated."))
+        st.markdown(data.get("summary", "No summary extracted."))
         st.divider()
         col_dl1, col_dl2 = st.columns([1, 1])
         with col_dl1:
             st.download_button(
-                label="📥 Download Revision Sheet (.md)",
+                label="📥 Download Markdown (.md)",
                 data=data.get("summary", ""),
-                file_name="ExamPrep_Revision_Sheet.md",
+                file_name="Revision_Sheet.md",
                 mime="text/markdown",
                 use_container_width=True,
             )
         with col_dl2:
             try:
-                pdf_bytes = export_summary_to_pdf(data.get("summary", ""))
+                pdf_data = export_summary_to_pdf(data.get("summary", ""))
                 st.download_button(
-                    label="📄 Download Revision Sheet (.pdf)",
-                    data=pdf_bytes,
-                    file_name="ExamPrep_Revision_Sheet.pdf",
+                    label="📄 Download Printable PDF (.pdf)",
+                    data=pdf_data,
+                    file_name="Revision_Sheet.pdf",
                     mime="application/pdf",
                     use_container_width=True,
                 )
             except Exception as e:
-                st.caption(f"PDF export unavailable: {e}")
+                st.caption(f"PDF export note: {e}")
 
     # --- TAB 2: FLASHCARDS ---
     with tab_flashcards:
-        flashcards = data.get("flashcards", [])
-        if not flashcards:
-            st.info("No flashcards found.")
+        cards = data.get("flashcards", [])
+        if not cards:
+            st.info("No definitions or flashcards could be extracted from this specific text.")
         else:
-            view_mode = st.radio(
-                "Flashcard Mode",
-                ["Interactive Carousel", "Grid View (All at once)"],
-                horizontal=True,
-            )
+            total_cards = len(cards)
+            c_idx = st.session_state["current_card"]
+            current = cards[c_idx]
             
-            if view_mode == "Interactive Carousel":
-                total_cards = len(flashcards)
-                card_idx = st.session_state["current_card"]
-                card = flashcards[card_idx]
-                
-                # Card progress
-                st.caption(f"Flashcard {card_idx + 1} of {total_cards}")
-                st.progress((card_idx + 1) / total_cards)
-                
-                # Card display box
-                st.markdown(f"""
-                <div class="flashcard-box">
-                    <div class="flashcard-q">❓ {card.get('front', '')}</div>
-                    {f'<div class="flashcard-a">💡 <b>Answer:</b><br/>{card.get("back", "").replace(chr(10), "<br/>")}</div>' if st.session_state["card_flipped"] else '<div style="color:#64748B; margin-top:10px; font-style:italic;">Click "Reveal Answer" below to test your recall</div>'}
-                </div>
-                """, unsafe_allow_html=True)
-                
-                col_btn1, col_btn2, col_btn3 = st.columns([1, 1, 1])
-                with col_btn1:
-                    if st.button("⬅ Previous Card", disabled=(card_idx == 0), use_container_width=True):
-                        st.session_state["current_card"] -= 1
-                        st.session_state["card_flipped"] = False
-                        st.rerun()
-                with col_btn2:
-                    flip_label = "🙈 Hide Answer" if st.session_state["card_flipped"] else "👁 Reveal Answer"
-                    if st.button(flip_label, type="primary", use_container_width=True):
-                        st.session_state["card_flipped"] = not st.session_state["card_flipped"]
-                        st.rerun()
-                with col_btn3:
-                    if st.button("Next Card ➡", disabled=(card_idx == total_cards - 1), use_container_width=True):
-                        st.session_state["current_card"] += 1
-                        st.session_state["card_flipped"] = False
-                        st.rerun()
-            else:
-                # Grid view
-                for idx, c in enumerate(flashcards):
-                    with st.expander(f"🎴 Flashcard {idx + 1}: {c.get('front', '')}"):
-                        st.markdown(f"**Answer:**\n\n{c.get('back', '')}")
+            st.caption(f"Card {c_idx + 1} of {total_cards}")
+            st.progress((c_idx + 1) / total_cards)
+            
+            # Flashcard Box
+            is_flipped = st.session_state["card_flipped"]
+            answer_html = f'<div class="flashcard-a"><b>Definition / Concept:</b><br/>{current.get("back", "").replace(chr(10), "<br/>")}</div>' if is_flipped else '<div style="color:#94A3B8; margin-top:14px; font-size:0.9rem; font-style:italic;">Click "Reveal Answer" to test your recall</div>'
+            
+            st.markdown(f"""
+            <div class="flashcard-box">
+                <div class="flashcard-q">{current.get('front', '')}</div>
+                {answer_html}
+            </div>
+            """, unsafe_allow_html=True)
+            
+            col_c1, col_c2, col_c3 = st.columns([1, 1, 1])
+            with col_c1:
+                if st.button("⬅ Previous Card", disabled=(c_idx == 0), use_container_width=True):
+                    st.session_state["current_card"] -= 1
+                    st.session_state["card_flipped"] = False
+                    st.rerun()
+            with col_c2:
+                btn_label = "🙈 Hide Answer" if is_flipped else "👁 Reveal Answer"
+                if st.button(btn_label, type="primary", use_container_width=True):
+                    st.session_state["card_flipped"] = not is_flipped
+                    st.rerun()
+            with col_c3:
+                if st.button("Next Card ➡", disabled=(c_idx == total_cards - 1), use_container_width=True):
+                    st.session_state["current_card"] += 1
+                    st.session_state["card_flipped"] = False
+                    st.rerun()
 
-    # --- TAB 3: MOCK QUIZ ---
+    # --- TAB 3: QUIZ ---
     with tab_quiz:
-        quiz_list = data.get("quiz", [])
-        if not quiz_list:
-            st.info("No quiz questions available.")
+        quiz_items = data.get("quiz", [])
+        if not quiz_items:
+            st.info("No quiz questions could be formed from the provided text.")
         else:
-            st.subheader(f"📝 Practice Mock Test ({len(quiz_list)} Questions)")
-            st.caption("Select your answers and click 'Submit Quiz' at the bottom to see your score and explanations.")
+            st.markdown(f"**Practice Mock Test** — {len(quiz_items)} Questions Grounded on Your Document")
+            st.write("")
             
-            # Form for quiz
-            for q in quiz_list:
-                qid = str(q.get("id", ""))
-                question_text = q.get("question", "")
-                options = q.get("options", [])
-                correct_idx = q.get("correct_index", 0)
-                explanation = q.get("explanation", "")
+            for item in quiz_items:
+                qid = str(item.get("id"))
+                q_text = item.get("question", "")
+                opts = item.get("options", [])
+                c_idx = item.get("correct_index", 0)
+                exp = item.get("explanation", "")
                 
                 st.markdown(f"""
                 <div class="quiz-card">
-                    <div class="quiz-q">Question {qid}: {question_text}</div>
+                    <div class="quiz-num">Question {qid}</div>
+                    <div class="quiz-question">{q_text}</div>
                 </div>
                 """, unsafe_allow_html=True)
                 
-                user_choice = st.radio(
-                    f"Choose answer for Q{qid}:",
-                    options,
-                    index=None if not st.session_state["quiz_submitted"] else st.session_state["user_answers"].get(qid),
-                    key=f"radio_{qid}",
+                selected = st.radio(
+                    f"Options for {qid}",
+                    opts,
+                    index=st.session_state["user_answers"].get(qid),
+                    key=f"q_radio_{qid}",
                     label_visibility="collapsed",
                     disabled=st.session_state["quiz_submitted"],
                 )
                 
-                if user_choice in options:
-                    st.session_state["user_answers"][qid] = options.index(user_choice)
+                if selected in opts:
+                    st.session_state["user_answers"][qid] = opts.index(selected)
                     
-                # Show results after submit
                 if st.session_state["quiz_submitted"]:
-                    chosen = st.session_state["user_answers"].get(qid)
-                    if chosen == correct_idx:
-                        st.success(f"✓ **Correct!** {explanation}")
+                    chosen_idx = st.session_state["user_answers"].get(qid)
+                    if chosen_idx == c_idx:
+                        st.success(f"✓ **Correct!** {exp}")
                     else:
-                        st.error(f"✗ **Incorrect.** Correct answer: **{options[correct_idx]}**\n\n*Why:* {explanation}")
+                        st.error(f"✗ **Incorrect.** Correct: **{opts[c_idx]}**\n\n*{exp}*")
                 st.write("")
 
-            col_sub1, col_sub2 = st.columns([1, 1])
-            with col_sub1:
+            col_q1, col_q2 = st.columns([1, 1])
+            with col_q1:
                 if not st.session_state["quiz_submitted"]:
                     if st.button("Submit Quiz & Check Score", type="primary", use_container_width=True):
                         st.session_state["quiz_submitted"] = True
@@ -328,21 +413,15 @@ if data:
                         st.session_state["user_answers"] = {}
                         st.rerun()
                         
-            # Score summary
             if st.session_state["quiz_submitted"]:
                 correct_count = sum(
-                    1 for q in quiz_list
-                    if st.session_state["user_answers"].get(str(q.get("id"))) == q.get("correct_index")
+                    1 for item in quiz_items
+                    if st.session_state["user_answers"].get(str(item.get("id"))) == item.get("correct_index")
                 )
-                total_q = len(quiz_list)
-                pct = int((correct_count / total_q) * 100) if total_q > 0 else 0
+                tot = len(quiz_items)
+                pct = int((correct_count / tot) * 100) if tot > 0 else 0
                 
-                st.divider()
-                st.markdown(f'<div class="score-badge">Your Score: {correct_count} / {total_q} ({pct}%)</div>', unsafe_allow_html=True)
+                st.markdown(f'<div class="score-box">Your Score: {correct_count} / {tot} ({pct}%)</div>', unsafe_allow_html=True)
                 if pct == 100:
                     st.balloons()
-                    st.success("🎉 Outstanding! You mastered this topic completely!")
-                elif pct >= 60:
-                    st.info("👍 Solid score! Review the missed questions above before exam day.")
-                else:
-                    st.warning("⚠️ Review the Flashcards and Revision Sheet, then try again!")
+                    st.success("🎉 Perfect Score! You mastered this document completely.")

@@ -1,195 +1,283 @@
-"""AI Study Material Generator using Google Gemini API with fallback mock engine."""
+"""AI Study Material Generator with Strict Document Grounding.
+Supports Gemini API and an intelligent Local Document NLP Extractor (zero hallucination offline mode).
+"""
 
 import os
+import re
 import json
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Tuple
 
-SYSTEM_PROMPT = """You are an expert college professor and exam prep tutor.
-Given lecture notes or textbook material, generate a comprehensive exam prep package containing:
-1. "summary": A well-structured Markdown summary with:
-   - 📌 Core Concepts & Theoretical Foundations
-   - 🔑 Key Definitions & Terminology
-   - ⚡ Key Algorithms, Rules, or Formulas
-   - ⚠️ Common Exam Traps / Viva Pitfalls
-2. "flashcards": A list of active-recall flashcards, each with "front" (concise question or concept prompt) and "back" (clear, high-yield explanation).
-3. "quiz": A list of multiple-choice questions testing deep conceptual understanding. Each item must have:
-   - "id": integer starting from 1
-   - "question": text
-   - "options": list of 4 distinct choices
-   - "correct_index": integer (0, 1, 2, or 3) indicating the correct option
-   - "explanation": brief explanation of why the correct option is right and others are wrong
+STRICT_SYSTEM_PROMPT = """You are an academic exam prep tutor.
+STRICT GROUNDING MANDATE:
+- You must generate all summaries, flashcards, and quizzes SOLELY AND STRICTLY from the text provided by the user below.
+- Do NOT bring in outside knowledge or default to other subjects.
+- If the user provides notes on Electronics, every question and card MUST be about Electronics. If about Biology, every item MUST be about Biology.
+- Every definition and quiz question must be directly verifiable in the source text.
 
-Format your entire response as a valid JSON object matching this schema:
+Generate a valid JSON object matching this schema:
 {
-  "summary": "markdown string",
+  "summary": "Comprehensive Markdown summary organized by the document's actual headings, definitions, and key takeaways.",
   "flashcards": [
-    {"front": "...", "back": "..."}
+    {"front": "Concise active-recall prompt or 'What is [Term]?'", "back": "Direct definition and explanation from the document."}
   ],
   "quiz": [
     {
       "id": 1,
-      "question": "...",
-      "options": ["A", "B", "C", "D"],
+      "question": "Clear conceptual question directly based on the text.",
+      "options": ["Option A", "Option B", "Option C", "Option D"],
       "correct_index": 0,
-      "explanation": "..."
+      "explanation": "Why this is correct according to the provided text."
     }
   ]
 }
 """
 
-SAMPLE_OS_PRESETS = {
-    "summary": """### 📌 Core Concepts & Theoretical Foundations
-* **Process vs. Program:** A program is a passive executable file stored on disk; a process is an active entity with a Program Counter (PC), registers, and execution stack.
-* **Process Memory Layout:** Consists of 4 discrete segments:
-  * **Text Section:** Compiled binary machine code instructions.
-  * **Data Section:** Global and static variables.
-  * **Heap:** Memory dynamically allocated during runtime (e.g., `malloc()`).
-  * **Stack:** Stack frames containing local variables, return addresses, and function parameters.
+def extract_sentences(text: str) -> List[str]:
+    """Splits text into clean sentences."""
+    clean = re.sub(r'\s+', ' ', text)
+    sentences = re.split(r'(?<=[.!?])\s+', clean)
+    return [s.strip() for s in sentences if len(s.strip()) > 20]
 
----
+def extract_keywords_from_text(text: str) -> List[str]:
+    """Extracts prominent capitalized terms, nouns, and bold headers to use as distractors."""
+    bold_terms = re.findall(r'\*\*([^*]+)\*\*', text)
+    title_terms = re.findall(r'\b[A-Z][a-zA-Z0-9_-]{2,25}\b', text)
+    
+    candidates = []
+    seen = set()
+    stopwords = {"The", "This", "That", "These", "Those", "What", "When", "Where", "Which", "Why", "How", "And", "For", "With", "From", "Module", "Chapter", "Unit", "Section", "Page"}
+    
+    for term in bold_terms + title_terms:
+        cleaned = term.strip(": ,.-")
+        if cleaned and len(cleaned) > 2 and cleaned not in seen and cleaned not in stopwords:
+            seen.add(cleaned)
+            candidates.append(cleaned)
+    return candidates
 
-### 🔑 Key Definitions & Terminology
-* **PCB (Process Control Block):** The data structure in the OS kernel that tracks all metadata for a process (PID, State, Program Counter, CPU registers, memory limits, and open file descriptors).
-* **Convoy Effect:** A scheduling bottleneck in FCFS where short I/O-bound processes wait behind a massive CPU-bound process, drastically increasing average waiting time.
-* **Context Switch:** The state save of the currently executing process and restoration of the state of another process. Pure overhead because the CPU does no useful work during switching.
-
----
-
-### ⚡ Critical Section & Semaphores
-* Any valid solution to the Critical Section problem **must** satisfy:
-  1. **Mutual Exclusion:** Only one process inside the critical section at a time.
-  2. **Progress:** Processes outside the remainder section decide who enters next without deadlocking.
-  3. **Bounded Waiting:** A process will not be starved indefinitely.
-* **Semaphore:** Integer variable modified atomically only via:
-  * `wait()` / `P()`: decrements value, blocks if negative.
-  * `signal()` / `V()`: increments value, unblocks waiting process.
-
----
-
-### ⚠️ The 4 Coffman Deadlock Conditions (Memorize for Exams!)
-Deadlock occurs **if and only if** all four conditions hold simultaneously:
-1. **Mutual Exclusion** (at least one non-shareable resource)
-2. **Hold and Wait** (holding one resource while requesting another)
-3. **No Preemption** (resources cannot be forcibly taken)
-4. **Circular Wait** (closed chain of circular dependencies)""",
-    "flashcards": [
-        {
-            "front": "What is the difference between a Program and a Process?",
-            "back": "A Program is a passive collection of instructions stored on disk. A Process is an active running instance with memory (stack, heap, text, data) and a program counter."
-        },
-        {
-            "front": "What are the 4 segments in a process's memory layout?",
-            "back": "1. Text (code instructions)\n2. Data (global & static variables)\n3. Heap (dynamic runtime memory)\n4. Stack (local variables, function calls)"
-        },
-        {
-            "front": "Name the 5 standard states in a Process Life Cycle.",
-            "back": "1. New (being created)\n2. Ready (waiting for CPU)\n3. Running (executing on CPU)\n4. Waiting / Blocked (waiting for I/O)\n5. Terminated (finished)"
-        },
-        {
-            "front": "What is the 'Convoy Effect' in CPU Scheduling?",
-            "back": "A problem in FCFS scheduling where multiple short processes get delayed behind one long, CPU-intensive process, reducing CPU utilization."
-        },
-        {
-            "front": "Which CPU scheduling algorithm is mathematically optimal for minimum average waiting time?",
-            "back": "Shortest Job First (SJF). However, it is difficult to implement in practice because the next CPU burst length cannot be predicted with 100% certainty."
-        },
-        {
-            "front": "What are the 3 criteria a valid Critical Section solution MUST satisfy?",
-            "back": "1. Mutual Exclusion\n2. Progress\n3. Bounded Waiting"
-        },
-        {
-            "front": "List the 4 Coffman conditions required for Deadlock.",
-            "back": "1. Mutual Exclusion\n2. Hold and Wait\n3. No Preemption\n4. Circular Wait"
-        }
-    ],
-    "quiz": [
-        {
-            "id": 1,
-            "question": "Which segment of process memory is dynamically allocated at runtime using functions like malloc() in C?",
-            "options": ["Text Section", "Data Section", "Heap", "Stack"],
-            "correct_index": 2,
-            "explanation": "The Heap is the pool of free memory used for dynamic memory allocation during execution."
-        },
-        {
-            "id": 2,
-            "question": "Which CPU scheduling algorithm associates each process with its next CPU burst length and guarantees minimum average waiting time?",
-            "options": ["First-Come, First-Served (FCFS)", "Shortest Job First (SJF)", "Round Robin (RR)", "Priority Scheduling"],
-            "correct_index": 1,
-            "explanation": "SJF is provably optimal in terms of minimizing average waiting time for a given set of processes."
-        },
-        {
-            "id": 3,
-            "question": "In Round Robin scheduling, what happens if the time quantum is chosen to be extremely large?",
-            "options": ["It causes severe starvation", "It behaves identically to FCFS", "Context switch overhead reaches 100%", "The system deadlocks immediately"],
-            "correct_index": 1,
-            "explanation": "If the time quantum exceeds the longest CPU burst, every process finishes before preemption, degrading the behavior to standard FCFS."
-        },
-        {
-            "id": 4,
-            "question": "Which of the following is NOT one of the 4 Coffman conditions necessary for a deadlock?",
-            "options": ["Hold and Wait", "No Preemption", "Starvation", "Circular Wait"],
-            "correct_index": 2,
-            "explanation": "Starvation is a scheduling anomaly (indefinite postponement), not one of Coffman's 4 formal conditions for deadlock."
-        },
-        {
-            "id": 5,
-            "question": "What is the primary drawback of a Context Switch between two processes?",
-            "options": ["It deletes the PCB from RAM", "It is pure overhead where the CPU executes no useful user work", "It violates mutual exclusion", "It resets the operating system kernel"],
-            "correct_index": 1,
-            "explanation": "During a context switch, the OS must save registers and flush caches. The CPU does zero useful application processing during this period."
-        }
-    ]
-}
+def extract_local_study_materials(content_text: str, num_questions: int = 5) -> Dict:
+    """Intelligently extracts summary, flashcards, and quiz directly from the user's document without external APIs."""
+    lines = [line.strip() for line in content_text.splitlines() if line.strip()]
+    sentences = extract_sentences(content_text)
+    keywords = extract_keywords_from_text(content_text)
+    
+    # 1. Parse Headings & Sections
+    sections = {}
+    current_section = "General Overview"
+    sections[current_section] = []
+    
+    for line in lines:
+        if line.startswith(("#", "##", "###", "Module", "Chapter", "Unit", "SECTION", "PART")) or (len(line) < 60 and line.endswith(":")):
+            heading = line.lstrip("# ").strip(": ")
+            if heading:
+                current_section = heading
+                sections[current_section] = []
+        else:
+            sections[current_section].append(line)
+            
+    # 2. Build Structured Markdown Summary from the Document
+    summary_parts = []
+    summary_parts.append(f"### 📋 Key Topics from Document ({len(sections)} Main Sections Identified)")
+    
+    for sec_title, sec_lines in sections.items():
+        if not sec_lines and sec_title == "General Overview":
+            continue
+        summary_parts.append(f"#### 📌 {sec_title}")
+        # Take key bullet points or sentences
+        bullet_count = 0
+        for l in sec_lines:
+            if bullet_count >= 4:
+                break
+            if len(l) > 25 and not l.startswith("---"):
+                clean_l = l.lstrip("-*• ")
+                summary_parts.append(f"* **{clean_l[:80]}{'...' if len(clean_l)>80 else ''}** — {clean_l[80:] if len(clean_l)>80 else ''}")
+                bullet_count += 1
+        if bullet_count == 0 and sec_lines:
+            summary_parts.append(f"* {sec_lines[0]}")
+        summary_parts.append("")
+        
+    summary_parts.append("---")
+    summary_parts.append("### 🔑 Document Takeaways & Critical Concepts")
+    # Extract top definition sentences
+    def_sentences = []
+    def_pattern = re.compile(r'(\b[A-Za-z0-9\s_-]{2,35}\b)\s+(?:is defined as|is a|refers to|consists of|represents|functions as|means)\s+(.+)', re.IGNORECASE)
+    
+    for s in sentences:
+        match = def_pattern.search(s)
+        if match:
+            def_sentences.append((match.group(1).strip(), s))
+            if len(def_sentences) >= 6:
+                break
+                
+    for term, full_s in def_sentences:
+        summary_parts.append(f"* **{term.title()}:** {full_s}")
+        
+    if not def_sentences:
+        for s in sentences[:5]:
+            summary_parts.append(f"* {s}")
+            
+    summary_text = "\n".join(summary_parts)
+    
+    # 3. Build Flashcards from Actual Document Definitions & Concepts
+    flashcards = []
+    used_fronts = set()
+    
+    # Priority 1: Extracted definitions
+    for term, full_s in def_sentences:
+        front = f"What is {term.strip().title()}?"
+        if front not in used_fronts:
+            used_fronts.add(front)
+            flashcards.append({
+                "front": front,
+                "back": full_s
+            })
+            
+    # Priority 2: Key sections
+    for sec_title, sec_lines in sections.items():
+        if sec_title != "General Overview" and sec_lines:
+            front = f"Key concept under '{sec_title}'?"
+            if front not in used_fronts and len(flashcards) < 8:
+                used_fronts.add(front)
+                flashcards.append({
+                    "front": front,
+                    "back": " • " + "\n • ".join(sec_lines[:3])
+                })
+                
+    # Fallback fill
+    for s in sentences:
+        if len(flashcards) >= 6:
+            break
+        words = s.split()
+        if len(words) > 8:
+            key_term = " ".join(words[:3])
+            front = f"Explain the principle regarding: '{key_term}'"
+            if front not in used_fronts:
+                used_fronts.add(front)
+                flashcards.append({
+                    "front": front,
+                    "back": s
+                })
+                
+    # 4. Build Multiple-Choice Quiz from the Document
+    quiz = []
+    fallback_distractors = ["None of the above", "All mentioned components", "Varies based on context", "Static state"]
+    candidate_distractors = keywords if len(keywords) >= 8 else (keywords + fallback_distractors)
+    
+    target_q_count = min(num_questions, max(3, len(sentences)))
+    selected_sentences = [s for s in sentences if len(s) > 40][:target_q_count * 2]
+    
+    qid = 1
+    for s in selected_sentences:
+        if qid > num_questions:
+            break
+            
+        # Try to identify a key noun/term in this sentence
+        found_target = None
+        for kw in keywords:
+            if f" {kw.lower()} " in f" {s.lower()} " and len(kw) > 3:
+                found_target = kw
+                break
+                
+        if found_target:
+            # Create a fill-in/identifying question
+            question_text = f"According to the provided document, which concept matches this statement:\n\"{s.replace(found_target, '______')}\"?"
+            correct_answer = found_target
+            
+            # Select 3 distinct distractors from other document keywords
+            other_kw = [k for k in candidate_distractors if k.lower() != found_target.lower()]
+            distractors = other_kw[:3]
+            while len(distractors) < 3:
+                distractors.append(f"Alternative Concept {len(distractors)+1}")
+                
+            options = [correct_answer] + distractors[:3]
+            # Simple deterministic shuffle based on sentence length
+            rot = len(s) % 4
+            options = options[rot:] + options[:rot]
+            correct_index = options.index(correct_answer)
+            
+            quiz.append({
+                "id": qid,
+                "question": question_text,
+                "options": options,
+                "correct_index": correct_index,
+                "explanation": f"Found directly in document: \"{s}\""
+            })
+            qid += 1
+            
+    # If not enough quiz questions could be formed, generate structured comprehension questions
+    while qid <= min(num_questions, max(3, len(sentences))):
+        s = sentences[(qid - 1) % len(sentences)]
+        quiz.append({
+            "id": qid,
+            "question": f"Which of the following statements is directly asserted in the text?",
+            "options": [
+                s,
+                "This concept is entirely deprecated in modern systems.",
+                "The text indicates this is strictly optional and unsupported.",
+                "None of the statements are supported by the notes."
+            ],
+            "correct_index": 0,
+            "explanation": f"The document states: \"{s}\""
+        })
+        qid += 1
+        
+    return {
+        "summary": summary_text,
+        "flashcards": flashcards,
+        "quiz": quiz,
+        "engine_used": "Local Document NLP Extractor (100% Grounded Offline Mode)"
+    }
 
 
 def generate_study_materials(content_text: str, api_key: Optional[str] = None, num_questions: int = 5) -> Dict:
-    """Generates summary, flashcards, and quiz using Gemini API, or fallback if key not supplied."""
+    """Generates study materials using Gemini with strict grounding, or local document extractor if no key."""
     resolved_key = api_key or os.environ.get("GEMINI_API_KEY")
     
-    if not resolved_key or resolved_key.strip() in ("", "DEMO", "SAMPLE"):
-        # Return high-quality curated sample material
-        return SAMPLE_OS_PRESETS
+    # If no API key provided, parse the user's specific document locally
+    if not resolved_key or resolved_key.strip() in ("", "DEMO", "OFFLINE"):
+        return extract_local_study_materials(content_text, num_questions=num_questions)
 
+    # If API key is provided, use Google Gemini with strict grounding
     try:
         from google import genai
         from google.genai import types
 
-        client = genai.Client(api_key=resolved_key)
+        client = genai.Client(api_key=resolved_key.strip())
         
-        user_prompt = f"""Generate exam prep materials for the following lecture notes.
-Create a summary, 6-8 flashcards, and {num_questions} multiple-choice questions.
+        user_prompt = f"""STRICT GROUNDING INSTRUCTION:
+Generate revision notes, {num_questions} quiz questions, and flashcards EXCLUSIVELY from the text below.
+DO NOT introduce external knowledge, other subjects, or generic assumptions.
 
-LECTURE NOTES:
+USER DOCUMENT:
 \"\"\"
-{content_text[:30000]}
+{content_text[:40000]}
 \"\"\"
 """
         response = client.models.generate_content(
             model="gemini-2.5-flash",
             contents=user_prompt,
             config=types.GenerateContentConfig(
-                system_instruction=SYSTEM_PROMPT,
+                system_instruction=STRICT_SYSTEM_PROMPT,
                 response_mime_type="application/json",
-                temperature=0.3,
+                temperature=0.2,
             )
         )
         
         data = json.loads(response.text)
-        # Ensure all required keys exist
         if "summary" in data and "flashcards" in data and "quiz" in data:
+            data["engine_used"] = "Google Gemini 2.5 Flash (Strict Document Grounding)"
             return data
         else:
-            raise ValueError("Incomplete schema returned by Gemini API.")
+            raise ValueError("Incomplete JSON schema returned by Gemini.")
             
     except Exception as e:
-        # Fall back to sample presets if API call failed, but attach error note
-        fallback = dict(SAMPLE_OS_PRESETS)
-        fallback["error_notice"] = str(e)
-        return fallback
+        # Fall back to our local document NLP extractor on the user's text
+        local_data = extract_local_study_materials(content_text, num_questions=num_questions)
+        local_data["error_notice"] = f"Gemini API Notice: {e}. Falling back to Local Document Extractor."
+        return local_data
 
 
 def export_summary_to_pdf(summary_text: str) -> bytes:
-    """Generates a downloadable PDF binary of the generated revision summary."""
+    """Generates a downloadable PDF binary of the revision summary using White & Red styling."""
     import io
     from reportlab.lib.pagesizes import letter
     from reportlab.lib import colors
@@ -206,43 +294,52 @@ def export_summary_to_pdf(summary_text: str) -> bytes:
         bottomMargin=54,
     )
     styles = getSampleStyleSheet()
+    
+    crimson_color = colors.HexColor("#DC2626")
+    dark_slate = colors.HexColor("#0F172A")
+    ruby_dark = colors.HexColor("#991B1B")
+    
     title_style = ParagraphStyle(
-        "T",
+        "PDFTitle",
         fontName="Helvetica-Bold",
         fontSize=18,
         leading=22,
-        textColor=colors.HexColor("#1E3A8A"),
+        textColor=crimson_color,
         spaceAfter=10,
     )
     h2_style = ParagraphStyle(
-        "H",
+        "PDFH2",
         fontName="Helvetica-Bold",
         fontSize=12,
         leading=16,
-        textColor=colors.HexColor("#0284C7"),
+        textColor=ruby_dark,
         spaceBefore=10,
         spaceAfter=4,
     )
     body_style = ParagraphStyle(
-        "B",
+        "PDFBody",
         fontName="Helvetica",
         fontSize=9.5,
         leading=13.5,
-        textColor=colors.HexColor("#0F172A"),
+        textColor=dark_slate,
         spaceAfter=4,
     )
 
-    story = [Paragraph("ExamPrep AI — Fast Revision Summary", title_style), Spacer(1, 8)]
+    story = [
+        Paragraph("ExamPrep AI — Revision Summary", title_style),
+        Spacer(1, 8),
+    ]
+    
     for line in summary_text.splitlines():
         cleaned = line.strip()
         if not cleaned:
             story.append(Spacer(1, 4))
         elif cleaned.startswith("### "):
             safe = cleaned[4:].replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;").replace("*", "")
-            story.append(Paragraph(safe, h2_style))
-        elif cleaned.startswith("## "):
-            safe = cleaned[3:].replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;").replace("*", "")
             story.append(Paragraph(safe, title_style))
+        elif cleaned.startswith("#### "):
+            safe = cleaned[5:].replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;").replace("*", "")
+            story.append(Paragraph(safe, h2_style))
         else:
             safe = cleaned.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;").replace("*", "")
             story.append(Paragraph(safe, body_style))
